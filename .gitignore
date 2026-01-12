@@ -1,0 +1,34 @@
+# Node
+node_modules/
+**/node_modules/
+mqtt-bridge/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Supabase
+.supabase/
+supabase/.temp/
+supabase/.env
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Build
+dist/
+build/

@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  emqx:
+    image: emqx/emqx:5.6
+    container_name: emqx
+    restart: unless-stopped
+    ports:
+      - "1883:1883"   # MQTT TCP
+      - "8883:8883"   # MQTT TLS (opcional)
+      - "8083:8083"   # MQTT sobre WebSocket
+      - "8084:8084"   # MQTT sobre WebSocket TLS (opcional)
+      - "18083:18083" # Dashboard web
+    environment:
+      - EMQX_DASHBOARD__DEFAULT_USERNAME=admin
+      - EMQX_DASHBOARD__DEFAULT_PASSWORD=admin
+      - EMQX_ALLOW_ANONYMOUS=false
+      - EMQX_AUTHENTICATION__1__MECHANISM=password_based
+      - EMQX_AUTHENTICATION__1__BACKEND=built_in_database
+      - EMQX_AUTHENTICATION__1__CONFIG__PASSWORD_HASH_ALGORITHM=bcrypt
+      - EMQX_AUTHENTICATION__1__CONFIG__USER_ID_TYPE=username
+      - EMQX_AUTHENTICATION__1__CONFIG__USERS__1__USERNAME=admin
+      - EMQX_AUTHENTICATION__1__CONFIG__USERS__1__PASSWORD=admin
