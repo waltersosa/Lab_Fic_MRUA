@@ -212,26 +212,6 @@ export default function App() {
     }
   };
 
-  // Simulate data for testing (remove in production)
-  const simulateData = async () => {
-    const tiempo = 1 + Math.random() * 5;
-    const distancia = 1.5;
-    const velocidad = distancia / tiempo;
-    const aceleracion = (Math.random() * 2) - 1; // -1 a 1 m/s^2
-    const v12 = velocidad * (0.8 + Math.random() * 0.4);
-    const v23 = velocidad * (0.9 + Math.random() * 0.2);
-    const v34 = velocidad * (1.0 + Math.random() * 0.2);
-
-    try {
-      await fetch(`${API_BASE}/simulate-data`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tiempo, distancia, velocidad, aceleracion, v12, v23, v34 })
-      });
-    } catch (err) {
-      console.error('Error simulating data:', err);
-    }
-  };
 
   // Poll for data updates
   useEffect(() => {
@@ -272,21 +252,27 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Header */}
-      <header className="bg-white shadow-md border-b-4 border-blue-600">
+      <header className="bg-gradient-to-r from-blue-600 to-indigo-700 shadow-xl border-b-4 border-blue-800">
         <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex items-center gap-4">
-            <div className="bg-blue-600 p-3 rounded-lg">
-              <Activity className="w-8 h-8 text-white" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="bg-white/20 backdrop-blur-sm p-4 rounded-xl shadow-lg">
+                <Activity className="w-10 h-10 text-white" />
+              </div>
+              <div>
+                <h1 className="text-4xl font-bold text-white drop-shadow-lg">
+                  Control de Experimento MRUA
+                </h1>
+                <p className="text-blue-100 mt-2 text-lg">
+                  Movimiento Rectilíneo Uniformemente Acelerado
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">
-                Control de Experimento MRUA
-              </h1>
-              <p className="text-gray-600 mt-1">
-                Movimiento Rectilíneo Uniformemente Acelerado - Laboratorio de Física
-              </p>
+            <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm px-6 py-3 rounded-xl border border-white/20">
+              <div className={`w-4 h-4 rounded-full ${getStatusColor(status)} shadow-lg`} />
+              <span className="font-bold text-white text-lg">{status}</span>
             </div>
           </div>
         </div>
@@ -308,57 +294,50 @@ export default function App() {
         )}
 
         {/* Control Panel */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <Play className="w-5 h-5" />
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl p-8 mb-8 border border-gray-200/50">
+          <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+            <div className="bg-blue-100 p-2 rounded-lg">
+              <Play className="w-6 h-6 text-blue-600" />
+            </div>
             Panel de Control
           </h2>
           
-          <div className="flex items-center gap-6 flex-wrap">
-            <button
-              onClick={startExperiment}
-              disabled={isLoading || status !== 'Listo'}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-8 py-3 rounded-lg font-semibold transition-colors flex items-center gap-2 shadow-md"
-            >
-              <Play className="w-5 h-5" />
-              {isLoading ? 'Iniciando...' : 'Iniciar Experimento'}
-            </button>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Botones principales */}
+            <div className="lg:col-span-2 flex items-center gap-4 flex-wrap">
+              <button
+                onClick={startExperiment}
+                disabled={isLoading || status !== 'Listo'}
+                className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 text-white px-10 py-4 rounded-xl font-bold text-lg transition-all flex items-center gap-3 shadow-lg hover:shadow-xl disabled:shadow-none transform hover:scale-105 disabled:transform-none"
+              >
+                <Play className="w-6 h-6" />
+                {isLoading ? 'Iniciando...' : 'Iniciar Experimento'}
+              </button>
 
-            <button
-              onClick={finalizeExperiment}
-              disabled={status !== 'Ejecutando'}
-              className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-300 text-white px-8 py-3 rounded-lg font-semibold transition-colors shadow-md"
-            >
-              Finalizar Experimento
-            </button>
+              <button
+                onClick={finalizeExperiment}
+                disabled={status !== 'Ejecutando'}
+                className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 disabled:from-gray-300 disabled:to-gray-400 text-white px-10 py-4 rounded-xl font-bold text-lg transition-all shadow-lg hover:shadow-xl disabled:shadow-none transform hover:scale-105 disabled:transform-none"
+              >
+                <Trash2 className="w-5 h-5 inline mr-2" />
+                Finalizar Experimento
+              </button>
+            </div>
 
-            <div className="flex items-center gap-3">
-              <span className="text-gray-700 font-medium">Velocidad:</span>
+            {/* Selector de velocidad */}
+            <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl p-4 border border-indigo-200">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Velocidad del Motor
+              </label>
               <select
                 value={speedMode}
                 onChange={(e) => setSpeedMode(e.target.value as 'baja' | 'alta')}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                className="w-full border-2 border-indigo-300 rounded-lg px-4 py-3 text-base font-medium bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
                 disabled={status === 'Ejecutando'}
               >
-                <option value="baja">Baja (210)</option>
-                <option value="alta">Alta (250)</option>
+                <option value="baja">Baja (210 PWM)</option>
+                <option value="alta">Alta (250 PWM)</option>
               </select>
-            </div>
-
-            {/* Test button - remove in production */}
-            <button
-              onClick={simulateData}
-              className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors text-sm"
-            >
-              Simular Datos (Test)
-            </button>
-
-            <div className="flex items-center gap-3 ml-auto">
-              <span className="text-gray-700 font-medium">Estado:</span>
-              <div className="flex items-center gap-2">
-                <div className={`w-3 h-3 rounded-full ${getStatusColor(status)}`} />
-                <span className="font-bold text-gray-900">{status}</span>
-              </div>
             </div>
           </div>
         </div>
@@ -366,107 +345,128 @@ export default function App() {
         {/* Data Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           {/* Tiempo */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-blue-500">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-gray-600 font-semibold">Tiempo Total</h3>
-              <Timer className="w-6 h-6 text-blue-500" />
+          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl shadow-xl p-8 border-2 border-blue-200 hover:shadow-2xl transition-all transform hover:scale-105">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-gray-700 font-bold text-lg">Tiempo Total</h3>
+              <div className="bg-blue-500 p-3 rounded-xl shadow-lg">
+                <Timer className="w-7 h-7 text-white" />
+              </div>
             </div>
-            <div className="text-4xl font-bold text-gray-900">
+            <div className="text-5xl font-extrabold text-blue-700 mb-2">
               {data.tiempo.toFixed(2)}
             </div>
-            <div className="text-gray-500 text-sm mt-1">segundos (s)</div>
+            <div className="text-blue-600 font-medium text-sm uppercase tracking-wide">segundos (s)</div>
           </div>
 
           {/* Velocidad Promedio */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-green-500">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-gray-600 font-semibold">Velocidad Promedio</h3>
-              <Gauge className="w-6 h-6 text-green-500" />
+          <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-2xl shadow-xl p-8 border-2 border-green-200 hover:shadow-2xl transition-all transform hover:scale-105">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-gray-700 font-bold text-lg">Velocidad Promedio</h3>
+              <div className="bg-green-500 p-3 rounded-xl shadow-lg">
+                <Gauge className="w-7 h-7 text-white" />
+              </div>
             </div>
-            <div className="text-4xl font-bold text-gray-900">
+            <div className="text-5xl font-extrabold text-green-700 mb-2">
               {data.velocidad.toFixed(2)}
             </div>
-            <div className="text-gray-500 text-sm mt-1">m/s</div>
+            <div className="text-green-600 font-medium text-sm uppercase tracking-wide">metros por segundo</div>
           </div>
 
           {/* Aceleración */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-red-500">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-gray-600 font-semibold">Aceleración</h3>
-              <Activity className="w-6 h-6 text-red-500" />
+          <div className="bg-gradient-to-br from-red-50 to-rose-100 rounded-2xl shadow-xl p-8 border-2 border-red-200 hover:shadow-2xl transition-all transform hover:scale-105">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-gray-700 font-bold text-lg">Aceleración</h3>
+              <div className="bg-red-500 p-3 rounded-xl shadow-lg">
+                <Activity className="w-7 h-7 text-white" />
+              </div>
             </div>
-            <div className="text-4xl font-bold text-gray-900">
+            <div className="text-5xl font-extrabold text-red-700 mb-2">
               {(data.aceleracion ?? 0).toFixed(2)}
             </div>
-            <div className="text-gray-500 text-sm mt-1">m/s²</div>
+            <div className="text-red-600 font-medium text-sm uppercase tracking-wide">metros por segundo²</div>
           </div>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
           {/* Camera Stream */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 h-full flex flex-col">
-            <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <Video className="w-5 h-5" />
+          <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 border-2 border-gray-200/50 h-full flex flex-col">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+              <div className="bg-purple-100 p-2 rounded-lg">
+                <Video className="w-6 h-6 text-purple-600" />
+              </div>
               Monitoreo en Vivo
             </h2>
             
-            <div className="aspect-video">
+            <div className="aspect-video rounded-xl overflow-hidden border-2 border-gray-300 shadow-inner bg-gray-100">
               <CameraStream isActive={status === 'Ejecutando'} />
             </div>
             
-            <div className="mt-4 text-gray-600 text-sm">
-              Cámara para monitorear el experimento en tiempo real.
+            <div className="mt-4 bg-purple-50 rounded-lg p-3 border border-purple-200">
+              <p className="text-gray-700 text-sm font-medium">
+                📹 Cámara para monitorear el experimento en tiempo real
+              </p>
             </div>
           </div>
 
           {/* Chart */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 h-full flex flex-col">
-            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <Activity className="w-5 h-5" />
+          <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 border-2 border-gray-200/50 h-full flex flex-col">
+            <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+              <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
+                <div className="bg-indigo-100 p-2 rounded-lg">
+                  <Activity className="w-6 h-6 text-indigo-600" />
+                </div>
                 Velocidad vs Tiempo (MRUA)
               </h2>
             </div>
             
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis 
-                  dataKey="tiempo" 
-                  label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -5 }}
-                  stroke="#6b7280"
-                />
-                <YAxis 
-                  label={{ value: 'Velocidad (m/s)', angle: -90, position: 'insideLeft' }}
-                  stroke="#6b7280"
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#fff', 
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                  }}
-                />
-                <Legend />
-                <Line 
-                  type="monotone" 
-                  dataKey="velocidad" 
-                  stroke="#2563eb" 
-                  strokeWidth={3}
-                  dot={{ fill: '#2563eb', r: 6 }}
-                  name="Velocidad (m/s)"
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            <div className="flex-1 min-h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.5} />
+                  <XAxis 
+                    dataKey="tiempo" 
+                    label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -5, style: { textAnchor: 'middle', fill: '#4b5563', fontWeight: 'bold' } }}
+                    stroke="#6b7280"
+                    tick={{ fill: '#6b7280', fontWeight: '500' }}
+                  />
+                  <YAxis 
+                    label={{ value: 'Velocidad (m/s)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#4b5563', fontWeight: 'bold' } }}
+                    stroke="#6b7280"
+                    tick={{ fill: '#6b7280', fontWeight: '500' }}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: '#fff', 
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '12px',
+                      boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                      padding: '12px'
+                    }}
+                    labelStyle={{ fontWeight: 'bold', color: '#1f2937' }}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                  <Line 
+                    type="monotone" 
+                    dataKey="velocidad" 
+                    stroke="#2563eb" 
+                    strokeWidth={4}
+                    dot={{ fill: '#2563eb', r: 8, strokeWidth: 2, stroke: '#fff' }}
+                    activeDot={{ r: 10, stroke: '#2563eb', strokeWidth: 2 }}
+                    name="Velocidad (m/s)"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
           {/* MRUA Calculation */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-            <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <Calculator className="w-5 h-5" />
+          <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-8 border-2 border-gray-200/50">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+              <div className="bg-amber-100 p-2 rounded-lg">
+                <Calculator className="w-6 h-6 text-amber-600" />
+              </div>
               Cálculo del MRUA
             </h2>
             
@@ -509,18 +509,20 @@ export default function App() {
         </div>
 
         {/* History Table */}
-        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-              <Clock className="w-5 h-5" />
+        <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-8 border-2 border-gray-200/50">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
+              <div className="bg-slate-100 p-2 rounded-lg">
+                <Clock className="w-6 h-6 text-slate-600" />
+              </div>
               Historial de Mediciones
             </h2>
             {history.length > 0 && (
               <button
                 onClick={clearHistory}
-                className="text-red-600 hover:text-red-700 flex items-center gap-2 text-sm font-medium"
+                className="bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors border border-red-200"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="w-5 h-5" />
                 Limpiar Historial
               </button>
             )}
@@ -572,15 +574,21 @@ export default function App() {
         </div>
 
         {/* Info Footer */}
-        <div className="mt-8 bg-blue-50 rounded-xl p-6 border border-blue-200">
-          <h3 className="font-bold text-blue-900 mb-2">Instrucciones de Uso</h3>
-          <ol className="list-decimal list-inside space-y-2 text-blue-800 text-sm">
-            <li>Configura las variables de entorno MQTT (MQTT_BROKER_URL, MQTT_USERNAME, MQTT_PASSWORD)</li>
-            <li>Haz clic en "Iniciar Experimento" para enviar el comando MQTT al sistema físico</li>
-            <li>Los datos (tiempo, distancia, velocidad) se recibirán automáticamente vía MQTT</li>
-            <li>Observa la gráfica y los cálculos en tiempo real</li>
-            <li>Haz clic en "Finalizar Experimento" para guardar la medición en el historial</li>
-            <li>El botón "Simular Datos" genera datos de prueba sin hardware físico</li>
+        <div className="mt-8 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-8 border-2 border-blue-200 shadow-lg">
+          <h3 className="font-bold text-blue-900 mb-4 text-xl flex items-center gap-2">
+            <div className="bg-blue-500 p-2 rounded-lg">
+              <AlertCircle className="w-5 h-5 text-white" />
+            </div>
+            Instrucciones de Uso
+          </h3>
+          <ol className="list-decimal list-inside space-y-3 text-blue-800 text-base">
+            <li className="font-medium">Configura las variables de entorno MQTT (MQTT_BROKER_URL, MQTT_USERNAME, MQTT_PASSWORD)</li>
+            <li className="font-medium">Selecciona la velocidad del motor (Baja o Alta) antes de iniciar</li>
+            <li className="font-medium">Haz clic en <strong>"Iniciar Experimento"</strong> para enviar el comando MQTT al sistema físico</li>
+            <li className="font-medium">Los datos (tiempo, distancia, velocidad, aceleración) se recibirán automáticamente vía MQTT</li>
+            <li className="font-medium">Observa la gráfica de velocidad vs tiempo y los cálculos en tiempo real</li>
+            <li className="font-medium">Haz clic en <strong>"Finalizar Experimento"</strong> para guardar la medición en el historial</li>
+            <li className="font-medium text-red-700">⚠️ Presiona "Finalizar" antes de iniciar un nuevo experimento para limpiar los datos</li>
           </ol>
         </div>
       </main>

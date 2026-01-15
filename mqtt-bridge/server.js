@@ -207,14 +207,6 @@ app.delete("/make-server-761e42e2/history", (_req, res) => {
   res.json({ success: true, message: "History cleared" });
 });
 
-// Simular datos
-app.post("/make-server-761e42e2/simulate-data", (req, res) => {
-  const { tiempo = 0, distancia = 0, velocidad = 0, aceleracion = 0, v12 = 0, v23 = 0, v34 = 0 } = req.body || {};
-  latestData = { tiempo, distancia, velocidad, aceleracion, v12, v23, v34, timestamp: Date.now() };
-  latestStatus = "Ejecutando";
-  persistLatest();
-  res.json({ success: true, data: latestData });
-});
 
 app.listen(PORT, () => {
   console.log(`[HTTP] MQTT bridge escuchando en http://localhost:${PORT}`);
