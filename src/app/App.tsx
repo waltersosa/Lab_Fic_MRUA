@@ -12,13 +12,21 @@ import {
   Video
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+// Supabase se eliminó; API_BASE apunta al bridge local o remoto
 import { CameraStream } from './components/CameraStream';
 
 interface ExperimentData {
   tiempo: number;
   distancia: number;
   velocidad: number;
+  aceleracion?: number;
+  v12?: number;
+  v23?: number;
+  v34?: number;
+  t12?: number;  // tiempo acumulado al sensor 2
+  t23?: number;  // tiempo acumulado al sensor 3
+  t34?: number;  // tiempo acumulado al sensor 4 (=tiempo total)
+  distanciaCalculada?: number;
   timestamp?: number;
 }
 
@@ -28,28 +36,30 @@ interface Measurement {
   tiempo: number;
   distancia: number;
   velocidad: number;
+  aceleracion?: number;
+  v12?: number;
+  v23?: number;
+  v34?: number;
 }
 
 type ExperimentStatus = 'Listo' | 'Ejecutando' | 'Finalizado';
 
 export default function App() {
   const [status, setStatus] = useState<ExperimentStatus>('Listo');
-  const [data, setData] = useState<ExperimentData>({ tiempo: 0, distancia: 0, velocidad: 0 });
+  const [data, setData] = useState<ExperimentData>({ tiempo: 0, distancia: 0, velocidad: 0, aceleracion: 0, distanciaCalculada: 0 });
   const [chartData, setChartData] = useState<ExperimentData[]>([]);
   const [history, setHistory] = useState<Measurement[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [speedMode, setSpeedMode] = useState<'baja' | 'alta'>('baja');
 
-  // Ahora el backend MQTT bridge corre como servicio HTTP local.
-  // Permite override vía env VITE_API_BASE para despliegues remotos.
-  const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3001/make-server-761e42e2";
+  // Backend MQTT bridge (sin Supabase). Configurable con VITE_API_BASE.
+  const API_BASE = (import.meta as any).env?.VITE_API_BASE || "http://localhost:3001/make-server-761e42e2";
 
   // Fetch experiment status
   const fetchStatus = async () => {
     try {
-      const response = await fetch(`${API_BASE}/experiment-status`, {
-        headers: { 'Authorization': `Bearer ${publicAnonKey}` }
-      });
+      const response = await fetch(`${API_BASE}/experiment-status`);
       const result = await response.json();
       if (result.status) {
         setStatus(result.status);
@@ -62,25 +72,34 @@ export default function App() {
   // Fetch experiment data
   const fetchData = async () => {
     try {
-      const response = await fetch(`${API_BASE}/experiment-data`, {
-        headers: { 'Authorization': `Bearer ${publicAnonKey}` }
-      });
+      const response = await fetch(`${API_BASE}/experiment-data`);
       const result = await response.json();
       
-      if (result.tiempo !== undefined) {
+      // Solo procesar datos válidos (>0) y con timestamp nuevo
+      if (result.tiempo !== undefined && result.tiempo > 0 && result.distancia > 0) {
         const hasNewData = result.timestamp !== data.timestamp;
-        
-        setData(result);
-        
-        // Update chart data
-        setChartData(prev => {
-          const newData = [...prev, result];
-          // Keep only last 20 points
-          return newData.slice(-20);
-        });
-        
-        // Auto-save when new valid measurement arrives from ESP32
-        if (hasNewData && result.tiempo > 0 && result.distancia > 0 && status === 'Ejecutando') {
+
+        if (!hasNewData) return;
+
+        const distanciaCalculada = result.velocidad * result.tiempo;
+        setData({ ...result, distanciaCalculada });
+
+        // Para MRUA, graficamos los 3 puntos de velocidad en sus tiempos intermedios
+        if (result.t12 && result.t23 && result.t34 && result.v12 && result.v23 && result.v34) {
+          setChartData([
+            { tiempo: result.t12, velocidad: result.v12, distancia: 0.5 },
+            { tiempo: result.t23, velocidad: result.v23, distancia: 1.0 },
+            { tiempo: result.t34, velocidad: result.v34, distancia: 1.5 }
+          ]);
+        } else {
+          // Fallback para MRU simple
+          setChartData([
+            { tiempo: 0, distancia: 0, velocidad: 0, distanciaCalculada: 0 },
+            { ...result, distanciaCalculada }
+          ]);
+        }
+
+        if (status === 'Ejecutando') {
           await autoSaveMeasurement(result);
         }
       }
@@ -94,14 +113,15 @@ export default function App() {
     try {
       await fetch(`${API_BASE}/save-measurement`, {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tiempo: measurementData.tiempo,
           distancia: measurementData.distancia,
-          velocidad: measurementData.velocidad
+          velocidad: measurementData.velocidad,
+          aceleracion: measurementData.aceleracion,
+          v12: measurementData.v12,
+          v23: measurementData.v23,
+          v34: measurementData.v34
         })
       });
       
@@ -115,9 +135,7 @@ export default function App() {
   // Fetch measurement history
   const fetchHistory = async () => {
     try {
-      const response = await fetch(`${API_BASE}/history`, {
-        headers: { 'Authorization': `Bearer ${publicAnonKey}` }
-      });
+      const response = await fetch(`${API_BASE}/history`);
       const result = await response.json();
       if (result.history) {
         setHistory(result.history);
@@ -135,10 +153,8 @@ export default function App() {
     try {
       const response = await fetch(`${API_BASE}/start-experiment`, {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'Content-Type': 'application/json'
-        }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ speedMode })
       });
       
       const result = await response.json();
@@ -146,7 +162,7 @@ export default function App() {
       if (result.success) {
         setStatus('Ejecutando');
         setChartData([]);
-        setData({ tiempo: 0, distancia: 0, velocidad: 0 });
+        setData({ tiempo: 0, distancia: 0, velocidad: 0, aceleracion: 0, distanciaCalculada: 0 });
       } else {
         setError(result.error || 'Error al iniciar experimento');
       }
@@ -164,23 +180,19 @@ export default function App() {
       try {
         await fetch(`${API_BASE}/save-measurement`, {
           method: 'POST',
-          headers: { 
-            'Authorization': `Bearer ${publicAnonKey}`,
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
         
         await fetch(`${API_BASE}/experiment-status`, {
           method: 'POST',
-          headers: { 
-            'Authorization': `Bearer ${publicAnonKey}`,
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'Finalizado' })
         });
         
-        setStatus('Finalizado');
+        setStatus('Listo');
+        setChartData([]);
+        setData({ tiempo: 0, distancia: 0, velocidad: 0, aceleracion: 0, distanciaCalculada: 0 });
         fetchHistory();
       } catch (err) {
         console.error('Error finalizing experiment:', err);
@@ -192,8 +204,7 @@ export default function App() {
   const clearHistory = async () => {
     try {
       await fetch(`${API_BASE}/history`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+        method: 'DELETE'
       });
       setHistory([]);
     } catch (err) {
@@ -203,18 +214,19 @@ export default function App() {
 
   // Simulate data for testing (remove in production)
   const simulateData = async () => {
-    const tiempo = Math.random() * 10;
-    const velocidad = 2 + Math.random() * 3; // 2-5 m/s
-    const distancia = velocidad * tiempo;
+    const tiempo = 1 + Math.random() * 5;
+    const distancia = 1.5;
+    const velocidad = distancia / tiempo;
+    const aceleracion = (Math.random() * 2) - 1; // -1 a 1 m/s^2
+    const v12 = velocidad * (0.8 + Math.random() * 0.4);
+    const v23 = velocidad * (0.9 + Math.random() * 0.2);
+    const v34 = velocidad * (1.0 + Math.random() * 0.2);
 
     try {
       await fetch(`${API_BASE}/simulate-data`, {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ tiempo, distancia, velocidad })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tiempo, distancia, velocidad, aceleracion, v12, v23, v34 })
       });
     } catch (err) {
       console.error('Error simulating data:', err);
@@ -234,25 +246,20 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Calculate MRU
-  const calculateMRU = () => {
-    const { tiempo, distancia, velocidad } = data;
-    
-    if (tiempo === 0) {
-      return null;
-    }
-
+  // Calculate MRUA
+  const calculateMRUA = () => {
+    const { tiempo, distancia, velocidad, aceleracion } = data;
+    if (tiempo === 0) return null;
     const velocidadCalculada = distancia / tiempo;
-    
     return {
-      formula: 'v = d / t',
-      substitucion: `v = ${distancia.toFixed(2)} m / ${tiempo.toFixed(2)} s`,
-      resultado: velocidadCalculada.toFixed(3),
+      formula: 'MRUA: d = v₀·t + ½·a·t²',
+      substitucion: `a = ${(aceleracion ?? 0).toFixed(3)} m/s²`,
+      resultado: `v_prom = ${velocidadCalculada.toFixed(3)} m/s`,
       velocidadMedida: velocidad.toFixed(3)
     };
   };
 
-  const mruCalculation = calculateMRU();
+  const mruaCalculation = calculateMRUA();
 
   // Status colors
   const getStatusColor = (status: ExperimentStatus) => {
@@ -275,10 +282,10 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-3xl font-bold text-gray-900">
-                Control de Experimento MRU
+                Control de Experimento MRUA
               </h1>
               <p className="text-gray-600 mt-1">
-                Movimiento Rectilíneo Uniforme - Laboratorio de Física
+                Movimiento Rectilíneo Uniformemente Acelerado - Laboratorio de Física
               </p>
             </div>
           </div>
@@ -310,7 +317,7 @@ export default function App() {
           <div className="flex items-center gap-6 flex-wrap">
             <button
               onClick={startExperiment}
-              disabled={isLoading || status === 'Ejecutando'}
+              disabled={isLoading || status !== 'Listo'}
               className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-8 py-3 rounded-lg font-semibold transition-colors flex items-center gap-2 shadow-md"
             >
               <Play className="w-5 h-5" />
@@ -324,6 +331,19 @@ export default function App() {
             >
               Finalizar Experimento
             </button>
+
+            <div className="flex items-center gap-3">
+              <span className="text-gray-700 font-medium">Velocidad:</span>
+              <select
+                value={speedMode}
+                onChange={(e) => setSpeedMode(e.target.value as 'baja' | 'alta')}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                disabled={status === 'Ejecutando'}
+              >
+                <option value="baja">Baja (210)</option>
+                <option value="alta">Alta (250)</option>
+              </select>
+            </div>
 
             {/* Test button - remove in production */}
             <button
@@ -348,7 +368,7 @@ export default function App() {
           {/* Tiempo */}
           <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-blue-500">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-gray-600 font-semibold">Tiempo</h3>
+              <h3 className="text-gray-600 font-semibold">Tiempo Total</h3>
               <Timer className="w-6 h-6 text-blue-500" />
             </div>
             <div className="text-4xl font-bold text-gray-900">
@@ -357,34 +377,34 @@ export default function App() {
             <div className="text-gray-500 text-sm mt-1">segundos (s)</div>
           </div>
 
-          {/* Distancia */}
+          {/* Velocidad Promedio */}
           <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-green-500">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-gray-600 font-semibold">Distancia</h3>
-              <Ruler className="w-6 h-6 text-green-500" />
-            </div>
-            <div className="text-4xl font-bold text-gray-900">
-              {data.distancia.toFixed(2)}
-            </div>
-            <div className="text-gray-500 text-sm mt-1">metros (m)</div>
-          </div>
-
-          {/* Velocidad */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-purple-500">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-gray-600 font-semibold">Velocidad</h3>
-              <Gauge className="w-6 h-6 text-purple-500" />
+              <h3 className="text-gray-600 font-semibold">Velocidad Promedio</h3>
+              <Gauge className="w-6 h-6 text-green-500" />
             </div>
             <div className="text-4xl font-bold text-gray-900">
               {data.velocidad.toFixed(2)}
             </div>
-            <div className="text-gray-500 text-sm mt-1">metros/segundo (m/s)</div>
+            <div className="text-gray-500 text-sm mt-1">m/s</div>
+          </div>
+
+          {/* Aceleración */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-red-500">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-gray-600 font-semibold">Aceleración</h3>
+              <Activity className="w-6 h-6 text-red-500" />
+            </div>
+            <div className="text-4xl font-bold text-gray-900">
+              {(data.aceleracion ?? 0).toFixed(2)}
+            </div>
+            <div className="text-gray-500 text-sm mt-1">m/s²</div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          {/* Camera Stream - NEW */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
+          {/* Camera Stream */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 h-full flex flex-col">
             <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
               <Video className="w-5 h-5" />
               Monitoreo en Vivo
@@ -394,19 +414,21 @@ export default function App() {
               <CameraStream isActive={status === 'Ejecutando'} />
             </div>
             
-            <p className="text-gray-600 text-sm mt-4">
-              Cámara del dispositivo para monitorear el experimento en tiempo real
-            </p>
+            <div className="mt-4 text-gray-600 text-sm">
+              Cámara para monitorear el experimento en tiempo real.
+            </div>
           </div>
 
           {/* Chart */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-            <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <Activity className="w-5 h-5" />
-              Gráfica Distancia vs Tiempo
-            </h2>
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 h-full flex flex-col">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <Activity className="w-5 h-5" />
+                Velocidad vs Tiempo (MRUA)
+              </h2>
+            </div>
             
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={260}>
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis 
@@ -415,7 +437,7 @@ export default function App() {
                   stroke="#6b7280"
                 />
                 <YAxis 
-                  label={{ value: 'Distancia (m)', angle: -90, position: 'insideLeft' }}
+                  label={{ value: 'Velocidad (m/s)', angle: -90, position: 'insideLeft' }}
                   stroke="#6b7280"
                 />
                 <Tooltip 
@@ -429,11 +451,11 @@ export default function App() {
                 <Legend />
                 <Line 
                   type="monotone" 
-                  dataKey="distancia" 
+                  dataKey="velocidad" 
                   stroke="#2563eb" 
-                  strokeWidth={2}
-                  dot={{ fill: '#2563eb', r: 4 }}
-                  name="Distancia (m)"
+                  strokeWidth={3}
+                  dot={{ fill: '#2563eb', r: 6 }}
+                  name="Velocidad (m/s)"
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -441,46 +463,39 @@ export default function App() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          {/* MRU Calculation */}
+          {/* MRUA Calculation */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
               <Calculator className="w-5 h-5" />
-              Cálculo del MRU
+              Cálculo del MRUA
             </h2>
             
-            {mruCalculation ? (
+            {mruaCalculation ? (
               <div className="space-y-4">
                 <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
                   <p className="text-gray-700 font-medium mb-1">Fórmula:</p>
                   <p className="text-2xl font-bold text-blue-700 font-mono">
-                    {mruCalculation.formula}
+                    {mruaCalculation.formula}
                   </p>
                 </div>
 
-                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                  <p className="text-gray-700 font-medium mb-1">Sustitución:</p>
-                  <p className="text-xl font-semibold text-gray-800 font-mono">
-                    {mruCalculation.substitucion}
+                <div className="bg-red-50 p-4 rounded-lg border border-red-200">
+                  <p className="text-gray-700 font-medium mb-1">Aceleración:</p>
+                  <p className="text-3xl font-bold text-red-700">
+                    {mruaCalculation.substitucion}
                   </p>
                 </div>
 
                 <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                  <p className="text-gray-700 font-medium mb-1">Velocidad Calculada:</p>
+                  <p className="text-gray-700 font-medium mb-1">Velocidad Promedio:</p>
                   <p className="text-3xl font-bold text-green-700">
-                    {mruCalculation.resultado} m/s
-                  </p>
-                </div>
-
-                <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
-                  <p className="text-gray-700 font-medium mb-1">Velocidad Medida:</p>
-                  <p className="text-3xl font-bold text-purple-700">
-                    {mruCalculation.velocidadMedida} m/s
+                    {mruaCalculation.resultado}
                   </p>
                 </div>
 
                 <div className="bg-amber-50 p-3 rounded-lg border border-amber-200">
                   <p className="text-sm text-amber-800">
-                    <strong>Nota:</strong> En un MRU ideal, la velocidad calculada y medida deberían ser iguales.
+                    <strong>Nota:</strong> En MRUA la velocidad aumenta linealmente. Las velocidades v₁₂, v₂₃, v₃₄ deben mostrar aceleración.
                   </p>
                 </div>
               </div>
@@ -518,8 +533,8 @@ export default function App() {
                   <tr className="border-b-2 border-gray-200">
                     <th className="text-left py-3 px-4 text-gray-700 font-semibold">Fecha / Hora</th>
                     <th className="text-right py-3 px-4 text-gray-700 font-semibold">Tiempo (s)</th>
-                    <th className="text-right py-3 px-4 text-gray-700 font-semibold">Distancia (m)</th>
                     <th className="text-right py-3 px-4 text-gray-700 font-semibold">Velocidad (m/s)</th>
+                    <th className="text-right py-3 px-4 text-gray-700 font-semibold">Aceleración (m/s²)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -537,10 +552,10 @@ export default function App() {
                         {measurement.tiempo.toFixed(2)}
                       </td>
                       <td className="py-3 px-4 text-right font-mono text-gray-900">
-                        {measurement.distancia.toFixed(2)}
+                        {measurement.velocidad.toFixed(2)}
                       </td>
                       <td className="py-3 px-4 text-right font-mono text-gray-900">
-                        {measurement.velocidad.toFixed(2)}
+                        {(measurement.aceleracion ?? 0).toFixed(2)}
                       </td>
                     </tr>
                   ))}
