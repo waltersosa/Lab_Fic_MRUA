@@ -51,7 +51,6 @@ export default function App() {
   const [history, setHistory] = useState<Measurement[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [speedMode, setSpeedMode] = useState<'baja' | 'alta'>('baja');
 
   // Backend MQTT bridge (sin Supabase). Configurable con VITE_API_BASE.
   const API_BASE = (import.meta as any).env?.VITE_API_BASE || "http://localhost:3001/make-server-761e42e2";
@@ -154,7 +153,7 @@ export default function App() {
       const response = await fetch(`${API_BASE}/start-experiment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ speedMode })
+        body: JSON.stringify({})
       });
       
       const result = await response.json();
@@ -176,27 +175,35 @@ export default function App() {
 
   // Finalize experiment and save to history
   const finalizeExperiment = async () => {
-    if (data.tiempo > 0 || data.distancia > 0) {
-      try {
+    try {
+      // Primero detener el motor del ESP32
+      await fetch(`${API_BASE}/stop-experiment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      // Si hay datos, guardarlos en el historial
+      if (data.tiempo > 0 || data.distancia > 0) {
         await fetch(`${API_BASE}/save-measurement`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
-        
-        await fetch(`${API_BASE}/experiment-status`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'Finalizado' })
-        });
-        
-        setStatus('Listo');
-        setChartData([]);
-        setData({ tiempo: 0, distancia: 0, velocidad: 0, aceleracion: 0, distanciaCalculada: 0 });
-        fetchHistory();
-      } catch (err) {
-        console.error('Error finalizing experiment:', err);
       }
+      
+      // Actualizar estado
+      await fetch(`${API_BASE}/experiment-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'Listo' })
+      });
+      
+      setStatus('Listo');
+      setChartData([]);
+      setData({ tiempo: 0, distancia: 0, velocidad: 0, aceleracion: 0, distanciaCalculada: 0 });
+      fetchHistory();
+    } catch (err) {
+      console.error('Error finalizing experiment:', err);
     }
   };
 
@@ -324,21 +331,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* Selector de velocidad */}
-            <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl p-4 border border-indigo-200">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Velocidad del Motor
-              </label>
-              <select
-                value={speedMode}
-                onChange={(e) => setSpeedMode(e.target.value as 'baja' | 'alta')}
-                className="w-full border-2 border-indigo-300 rounded-lg px-4 py-3 text-base font-medium bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
-                disabled={status === 'Ejecutando'}
-              >
-                <option value="baja">Baja (210 PWM)</option>
-                <option value="alta">Alta (250 PWM)</option>
-              </select>
-            </div>
           </div>
         </div>
 
@@ -583,7 +575,7 @@ export default function App() {
           </h3>
           <ol className="list-decimal list-inside space-y-3 text-blue-800 text-base">
             <li className="font-medium">Configura las variables de entorno MQTT (MQTT_BROKER_URL, MQTT_USERNAME, MQTT_PASSWORD)</li>
-            <li className="font-medium">Selecciona la velocidad del motor (Baja o Alta) antes de iniciar</li>
+            <li className="font-medium">Presiona "Iniciar Experimento" para comenzar la medición</li>
             <li className="font-medium">Haz clic en <strong>"Iniciar Experimento"</strong> para enviar el comando MQTT al sistema físico</li>
             <li className="font-medium">Los datos (tiempo, distancia, velocidad, aceleración) se recibirán automáticamente vía MQTT</li>
             <li className="font-medium">Observa la gráfica de velocidad vs tiempo y los cálculos en tiempo real</li>

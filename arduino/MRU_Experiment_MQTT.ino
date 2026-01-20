@@ -133,9 +133,17 @@ bool botonAnterior = HIGH;
    }
    Serial.println(mensaje);
    
- // Si recibe comando "start" en topic control
+ // Si recibe comando en topic control
  if (String(topic) == topic_control) {
-   if (mensaje.indexOf("start") >= 0) {
+   // Comando STOP: detener motor inmediatamente
+   if (mensaje.indexOf("stop") >= 0 || mensaje.indexOf("\"command\":\"stop\"") >= 0) {
+     Serial.println("¡Comando DETENER recibido por MQTT!");
+     detenerExperimento();
+     return;
+   }
+   
+   // Comando START: iniciar experimento
+   if (mensaje.indexOf("start") >= 0 || mensaje.indexOf("\"command\":\"start\"") >= 0) {
      Serial.println("¡Comando INICIAR recibido por MQTT!");
      iniciarExperimento();
    }
@@ -192,8 +200,13 @@ bool botonAnterior = HIGH;
      return;
    }
    
+   // ⚠️ IMPORTANTE: Resetear TODOS los flags y tiempos ANTES de iniciar
+   f1 = f2 = f3 = f4 = false;
+   t1 = t2 = t3 = t4 = 0;
+   
    experimentoActivo = true;
    
+   Serial.println("=== INICIANDO EXPERIMENTO ===");
    Serial.print("Motor PWM = ");
    Serial.println(velocidadMotor);
    
@@ -213,7 +226,34 @@ bool botonAnterior = HIGH;
    // Publicar estado
    client.publish(topic_status, "{\"status\":\"Ejecutando\"}");
  }
- 
+
+// ============ DETENER EXPERIMENTO ============
+void detenerExperimento() {
+  // Detener motor inmediatamente
+  ledcWrite(ENA, 0);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  
+  // Retornar servo a posición inicial
+  servoCarrito.write(servoInicial);
+  empujeActivo = false;
+  experimentoActivo = false;
+  
+  // Resetear flags de sensores
+  f1 = f2 = f3 = f4 = false;
+  t1 = t2 = t3 = t4 = 0;
+  
+  Serial.println("Motor DETENIDO - Sistema listo para nuevo experimento");
+  
+  lcd.clear();
+  lcd.print("Detenido");
+  lcd.setCursor(0, 1);
+  lcd.print("Listo");
+  
+  // Publicar estado
+  client.publish(topic_status, "{\"status\":\"Listo\"}");
+}
+
 // ============ PUBLICAR DATOS MQTT ============
 void publicarDatos(float tTotal, float velocidad, float aceleracion, float v12, float v23, float v34, float t12, float t23, float t34) {
   // Crear JSON con los datos + tiempos intermedios para graficar
@@ -297,50 +337,71 @@ void publicarDatos(float tTotal, float velocidad, float aceleracion, float v12, 
    
    botonAnterior = botonActual;
    
-   // -------- RETORNO SERVO --------
+   // -------- RETORNO SERVO (solo retornar, NO apagar motor) --------
+   // El servo solo se retorna después de 5 segundos, pero el motor sigue activo
+   // El motor se apaga solo cuando se detecta S4 o se recibe comando STOP
    if (empujeActivo && millis() - tiempoEmpuje >= 5000) {
      servoCarrito.write(servoInicial);
-     ledcWrite(ENA, 0);
-     digitalWrite(IN1, LOW);
-     digitalWrite(IN2, LOW);
-     empujeActivo = false;
-     Serial.println("Motor OFF");
+     empujeActivo = false; // Marcar que el servo ya retornó
+     Serial.println("Servo retornado (motor sigue activo)");
    }
    
-  // -------- DETECCIÓN SENSORES MRUA --------
-  if (!f1 && digitalRead(S1) == LOW) {
-    t1 = millis();
-    f1 = true;
-    Serial.println("S1 detectado");
-    lcd.clear();
-    lcd.print("Midiendo...");
-    delay(50);
-  }
+  // -------- DETECCIÓN SENSORES MRUA (solo si el experimento está activo) --------
+  if (experimentoActivo) {
+    // Detectar S1 (sensor de inicio)
+    if (!f1 && digitalRead(S1) == LOW) {
+      t1 = millis();
+      f1 = true;
+      Serial.print("✅ S1 detectado - Tiempo desde inicio: ");
+      Serial.print((t1 - tiempoEmpuje) / 1000.0, 3);
+      Serial.println(" s");
+      lcd.clear();
+      lcd.print("S1 detectado");
+      lcd.setCursor(0, 1);
+      lcd.print("Midiendo...");
+      delay(50);
+    }
 
-  if (f1 && !f2 && digitalRead(S2) == LOW) {
-    t2 = millis();
-    f2 = true;
-    Serial.println("S2 detectado");
-    delay(50);
-  }
+    // Detectar S2 (solo si ya pasó S1)
+    if (f1 && !f2 && digitalRead(S2) == LOW) {
+      t2 = millis();
+      f2 = true;
+      Serial.print("✅ S2 detectado - Tiempo S1->S2: ");
+      Serial.print((t2 - t1) / 1000.0, 3);
+      Serial.println(" s");
+      delay(50);
+    }
 
-  if (f2 && !f3 && digitalRead(S3) == LOW) {
-    t3 = millis();
-    f3 = true;
-    Serial.println("S3 detectado");
-    delay(50);
-  }
+    // Detectar S3 (solo si ya pasó S2)
+    if (f2 && !f3 && digitalRead(S3) == LOW) {
+      t3 = millis();
+      f3 = true;
+      Serial.print("✅ S3 detectado - Tiempo S2->S3: ");
+      Serial.print((t3 - t2) / 1000.0, 3);
+      Serial.println(" s");
+      delay(50);
+    }
 
-  if (f3 && !f4 && digitalRead(S4) == LOW) {
-    t4 = millis();
-    f4 = true;
-    Serial.println("S4 detectado");
-    
-    // Calcular y publicar MRUA
-    calcularMRUA();
-    
-    delay(4000);
-    resetSistema();
+    // Detectar S4 (solo si ya pasó S3) - FINAL
+    if (f3 && !f4 && digitalRead(S4) == LOW) {
+      t4 = millis();
+      f4 = true;
+      Serial.print("✅ S4 detectado - Tiempo S3->S4: ");
+      Serial.print((t4 - t3) / 1000.0, 3);
+      Serial.println(" s");
+      Serial.println("=== EXPERIMENTO COMPLETADO ===");
+      
+      // Detener motor inmediatamente cuando se detecta S4
+      ledcWrite(ENA, 0);
+      digitalWrite(IN1, LOW);
+      digitalWrite(IN2, LOW);
+      
+      // Calcular y publicar MRUA
+      calcularMRUA();
+      
+      delay(4000);
+      resetSistema();
+    }
   }
    
    delay(2);
@@ -348,16 +409,49 @@ void publicarDatos(float tTotal, float velocidad, float aceleracion, float v12, 
  
 // ============ CALCULAR MRUA ============
 void calcularMRUA() {
+  // Validar que todos los tiempos estén capturados correctamente
+  if (t1 == 0 || t2 == 0 || t3 == 0 || t4 == 0) {
+    Serial.println("⚠️ ERROR: Algunos tiempos no fueron capturados correctamente");
+    Serial.print("t1="); Serial.print(t1);
+    Serial.print(" t2="); Serial.print(t2);
+    Serial.print(" t3="); Serial.print(t3);
+    Serial.print(" t4="); Serial.println(t4);
+    return;
+  }
+  
+  // Validar que los tiempos sean secuenciales (t2 > t1, t3 > t2, t4 > t3)
+  if (t2 <= t1 || t3 <= t2 || t4 <= t3) {
+    Serial.println("⚠️ ERROR: Los tiempos no son secuenciales");
+    Serial.print("t1="); Serial.print(t1);
+    Serial.print(" t2="); Serial.print(t2);
+    Serial.print(" t3="); Serial.print(t3);
+    Serial.print(" t4="); Serial.println(t4);
+    return;
+  }
+  
   float t12 = (t2 - t1) / 1000.0;
   float t23 = (t3 - t2) / 1000.0;
   float t34 = (t4 - t3) / 1000.0;
   float tTotal = (t4 - t1) / 1000.0;
+
+  // Validar que los tiempos sean razonables (menos de 60 segundos)
+  if (tTotal > 60.0) {
+    Serial.println("⚠️ ERROR: Tiempo total demasiado grande (>60s). Posible error en captura.");
+    Serial.print("tTotal="); Serial.println(tTotal);
+    return;
+  }
 
   // Evitar división por cero
   if (t12 <= 0) t12 = 0.001;
   if (t23 <= 0) t23 = 0.001;
   if (t34 <= 0) t34 = 0.001;
   if (tTotal <= 0) tTotal = 0.001;
+  
+  Serial.println("--- Cálculos de tiempo ---");
+  Serial.print("t12 (S1->S2): "); Serial.print(t12, 3); Serial.println(" s");
+  Serial.print("t23 (S2->S3): "); Serial.print(t23, 3); Serial.println(" s");
+  Serial.print("t34 (S3->S4): "); Serial.print(t34, 3); Serial.println(" s");
+  Serial.print("tTotal (S1->S4): "); Serial.print(tTotal, 3); Serial.println(" s");
 
   float v12 = d / t12;
   float v23 = d / t23;

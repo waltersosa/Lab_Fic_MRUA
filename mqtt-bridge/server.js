@@ -6,9 +6,9 @@ import { MongoClient } from "mongodb";
 // ------------ Configuración ------------
 const PORT = process.env.PORT || 3001;
 const MQTT_BROKER_URL =
-  process.env.MQTT_BROKER_URL || "mqtt://192.168.10.203:1883";
+  process.env.MQTT_BROKER_URL || "mqtt://192.168.10.111:1883";
 const MQTT_USERNAME = process.env.MQTT_USERNAME || "admin";
-const MQTT_PASSWORD = process.env.MQTT_PASSWORD || "admin";
+const MQTT_PASSWORD = process.env.MQTT_PASSWORD || "admin1981";
 
 const MQTT_TOPIC_CONTROL = process.env.MQTT_TOPIC_CONTROL || "mru/control";
 const MQTT_TOPIC_DATA = process.env.MQTT_TOPIC_DATA || "mru/data";
@@ -84,26 +84,66 @@ async function persistHistory(measurement) {
 }
 
 // ------------ MQTT Client ------------
+console.log("[MQTT] Intentando conectar a:", MQTT_BROKER_URL);
+console.log("[MQTT] Usuario:", MQTT_USERNAME);
+console.log("[MQTT] Contraseña:", MQTT_PASSWORD ? "***" : "(vacía)");
+
 const mqttOptions = {
   clientId: `mru-bridge-${Math.random().toString(16).slice(2, 10)}`,
   clean: true,
   reconnectPeriod: 2000,
+  connectTimeout: 10000, // 10 segundos timeout
   username: MQTT_USERNAME,
   password: MQTT_PASSWORD,
+  // Opciones adicionales para debugging
+  keepalive: 60,
+  protocolVersion: 4, // MQTT 3.1.1
 };
 
 const mqttClient = mqtt.connect(MQTT_BROKER_URL, mqttOptions);
 
 mqttClient.on("connect", () => {
-  console.log("[MQTT] Conectado a", MQTT_BROKER_URL);
+  console.log("[MQTT] ✅ Conectado exitosamente a", MQTT_BROKER_URL);
   mqttClient.subscribe([MQTT_TOPIC_DATA, MQTT_TOPIC_STATUS], (err) => {
-    if (err) console.error("[MQTT] Error al suscribirse:", err);
-    else console.log("[MQTT] Suscrito a", MQTT_TOPIC_DATA, "y", MQTT_TOPIC_STATUS);
+    if (err) console.error("[MQTT] ❌ Error al suscribirse:", err);
+    else console.log("[MQTT] ✅ Suscrito a", MQTT_TOPIC_DATA, "y", MQTT_TOPIC_STATUS);
   });
 });
 
-mqttClient.on("reconnect", () => console.log("[MQTT] Reconnecting..."));
-mqttClient.on("error", (err) => console.error("[MQTT] Error:", err?.message || err));
+mqttClient.on("reconnect", () => {
+  console.log("[MQTT] 🔄 Reintentando conexión...");
+});
+
+mqttClient.on("error", (err) => {
+  console.error("[MQTT] ❌ Error de conexión:", err?.message || err);
+  console.error("[MQTT] Código de error:", err?.code);
+  console.error("[MQTT] Stack:", err?.stack);
+  
+  // Mensajes de ayuda según el tipo de error
+  if (err?.code === "EACCES") {
+    console.error("[MQTT] 💡 EACCES = Acceso denegado. Posibles causas:");
+    console.error("   1. El puerto 1883 está bloqueado por firewall");
+    console.error("   2. El broker MQTT no está escuchando en esa IP");
+    console.error("   3. El broker solo escucha en localhost (127.0.0.1)");
+    console.error("   4. Verifica que el broker esté corriendo en el Raspberry PI");
+  } else if (err?.code === "ECONNREFUSED") {
+    console.error("[MQTT] 💡 ECONNREFUSED = Conexión rechazada. Verifica:");
+    console.error("   1. El broker MQTT está corriendo?");
+    console.error("   2. La IP y puerto son correctos?");
+  } else if (err?.code === "ETIMEDOUT") {
+    console.error("[MQTT] 💡 ETIMEDOUT = Timeout. Verifica:");
+    console.error("   1. El Raspberry PI está en la misma red?");
+    console.error("   2. Puedes hacer ping a", MQTT_BROKER_URL.replace("mqtt://", "").split(":")[0]);
+  }
+});
+
+mqttClient.on("close", () => {
+  console.log("[MQTT] ⚠️ Conexión cerrada");
+});
+
+mqttClient.on("offline", () => {
+  console.log("[MQTT] ⚠️ Cliente MQTT desconectado");
+});
 
 mqttClient.on("message", (topic, payload) => {
   try {
@@ -158,20 +198,33 @@ app.post("/make-server-761e42e2/start-experiment", async (req, res) => {
   if (!mqttClient.connected) {
     return res.status(500).json({ success: false, error: "MQTT no conectado" });
   }
-  const { speedMode, speed } = req.body || {};
-  let speedValue = 230;
-  if (speedMode === "baja") speedValue = 210;
-  if (speedMode === "alta") speedValue = 250;
-  if (typeof speed === "number" && speed > 0) speedValue = speed;
 
-  const message = JSON.stringify({ command: "start", speed: speedValue, timestamp: Date.now() });
+  const message = JSON.stringify({ command: "start", timestamp: Date.now() });
   mqttClient.publish(MQTT_TOPIC_CONTROL, message, { qos: 1 }, (err) => {
     if (err) {
       console.error("[MQTT] Error al publicar:", err);
       return res.status(500).json({ success: false, error: "MQTT publish error" });
     }
     latestStatus = "Ejecutando";
-    res.json({ success: true, mqttTopic: MQTT_TOPIC_CONTROL, speed: speedValue });
+    res.json({ success: true, mqttTopic: MQTT_TOPIC_CONTROL });
+  });
+});
+
+// Detener experimento (publica comando STOP en MQTT)
+app.post("/make-server-761e42e2/stop-experiment", async (req, res) => {
+  if (!mqttClient.connected) {
+    return res.status(500).json({ success: false, error: "MQTT no conectado" });
+  }
+
+  const message = JSON.stringify({ command: "stop", timestamp: Date.now() });
+  mqttClient.publish(MQTT_TOPIC_CONTROL, message, { qos: 1 }, (err) => {
+    if (err) {
+      console.error("[MQTT] Error al publicar stop:", err);
+      return res.status(500).json({ success: false, error: "MQTT publish error" });
+    }
+    latestStatus = "Listo";
+    persistLatest();
+    res.json({ success: true, message: "Comando STOP enviado al ESP32" });
   });
 });
 
