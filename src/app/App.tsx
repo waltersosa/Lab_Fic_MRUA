@@ -27,6 +27,7 @@ interface ExperimentData {
   t23?: number;  // tiempo acumulado al sensor 3
   t34?: number;  // tiempo acumulado al sensor 4 (=tiempo total)
   distanciaCalculada?: number;
+  mode?: string;  // "remote" o "presential"
   timestamp?: number;
 }
 
@@ -183,12 +184,42 @@ export default function App() {
       });
       
       // Si hay datos, guardarlos en el historial
+      // Marcar como prueba fallida cuando se finaliza manualmente
       if (data.tiempo > 0 || data.distancia > 0) {
-        await fetch(`${API_BASE}/save-measurement`, {
+        // Asegurar que se envíen todos los campos necesarios
+        const measurementData = {
+          tiempo: data.tiempo,
+          distancia: data.distancia,
+          velocidad: data.velocidad,
+          aceleracion: data.aceleracion,
+          v12: data.v12,
+          v23: data.v23,
+          v34: data.v34,
+          t12: data.t12,
+          t23: data.t23,
+          t34: data.t34,
+          mode: data.mode || "remote",  // Modo: "remote" o "presential"
+          timestamp: data.timestamp,
+          failed: true  // Marcar como prueba fallida (finalizada manualmente)
+        };
+        
+        console.log('Guardando medicion al finalizar:', measurementData);
+        
+        const response = await fetch(`${API_BASE}/save-measurement`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
+          body: JSON.stringify(measurementData)
         });
+        
+        const result = await response.json();
+        if (result.success) {
+          console.log('Medicion guardada exitosamente (marcada como prueba fallida):', result.measurement);
+          alert('Experimento finalizado manualmente. Se guardó como prueba fallida.');
+        } else {
+          console.error('Error al guardar medicion:', result.error);
+        }
+      } else {
+        console.warn('No hay datos para guardar. Tiempo:', data.tiempo, 'Distancia:', data.distancia);
       }
       
       // Actualizar estado

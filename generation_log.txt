@@ -1,0 +1,10 @@
+2026-01-26 15:56:38.633263: [OK] Conectado a MongoDB: mru
+2026-01-26 15:58:01.027481: [OK] Conectado a MongoDB: mru
+2026-01-26 15:58:01.028491: Iniciando generación de 50 datos presenciales y 50 remotos
+2026-01-26 15:58:01.035869: [OK] Insertados 100 documentos exitosamente en 'history'.
+2026-01-26 16:48:23.094253: [OK] Conectado a MongoDB: mru
+2026-01-26 16:48:23.095303: Iniciando generación de 50 datos presenciales y 50 remotos
+2026-01-26 16:48:23.099578: [OK] Insertados 100 documentos exitosamente en 'history'.
+2026-02-06 12:32:49.410732: [OK] Conectado a MongoDB: mru
+2026-02-06 12:32:49.412812: Iniciando generación de 25 pares correlacionados.
+2026-02-06 12:32:49.440346: [OK] Insertados 50 documentos correlacionados exitosamente.

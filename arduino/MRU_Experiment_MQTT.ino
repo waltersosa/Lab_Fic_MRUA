@@ -71,7 +71,7 @@ const int pinBoton = 18;
  // ---------------- PWM MOTOR ----------------
 const int pwmFreq = 1000;      // Hz
 const int pwmResolucion = 8;   // 0–255
-int velocidadMotor = 230;      // se ajusta por MQTT (baja=210, alta=250)
+int velocidadMotor = 180;      // REDUCIDO para mayor estabilidad (antes 230)
  
 // ---------------- MRUA ----------------
 const float d = 0.50;  // distancia entre sensores (metros)
@@ -81,8 +81,9 @@ bool empujeActivo = false;
 unsigned long tiempoEmpuje = 0;
 bool botonAnterior = HIGH;
  
- // Control experimento MQTT
- bool experimentoActivo = false;
+// Control experimento MQTT
+bool experimentoActivo = false;
+String modoExperimento = "remote";  // "remote" o "presential"
  
  // ============ FUNCIONES WIFI ============
  void setup_wifi() {
@@ -142,11 +143,13 @@ bool botonAnterior = HIGH;
      return;
    }
    
-   // Comando START: iniciar experimento
-   if (mensaje.indexOf("start") >= 0 || mensaje.indexOf("\"command\":\"start\"") >= 0) {
-     Serial.println("¡Comando INICIAR recibido por MQTT!");
-     iniciarExperimento();
-   }
+  // Comando START: iniciar experimento
+  if (mensaje.indexOf("start") >= 0 || mensaje.indexOf("\"command\":\"start\"") >= 0) {
+    modoExperimento = "remote";  // Comando MQTT = remoto
+    Serial.println("=== MODO: REMOTO (comando MQTT) ===");
+    Serial.println("¡Comando INICIAR recibido por MQTT!");
+    iniciarExperimento();
+  }
  }
 }
  
@@ -215,8 +218,38 @@ bool botonAnterior = HIGH;
    digitalWrite(IN2, HIGH);
    ledcWrite(ENA, velocidadMotor);
    
-   // Servo empuje
-   servoCarrito.write(servoEmpuje);
+   // Servo empuje SUAVE para evitar inestabilidad
+   // servoCarrito.write(servoEmpuje); <-- ANTERIOR (Brusco)
+   
+   // Mover gradualmente del inicio al fin
+   // Mover gradualmente del inicio al fin
+   if (servoInicial < servoEmpuje) {
+     for (int pos = servoInicial; pos <= servoEmpuje; pos += 2) { 
+       servoCarrito.write(pos);
+       
+       // CHEQUEO S1 DURANTE EMPUJE (Critical Patch)
+       if (!f1 && digitalRead(S1) == LOW) {
+         t1 = millis();
+         f1 = true;
+         // No imprimimos serial aquí para no perder tiempo, se reportará en loop
+       }
+       
+       delay(15); 
+     }
+   } else {
+     for (int pos = servoInicial; pos >= servoEmpuje; pos -= 2) { 
+       servoCarrito.write(pos);
+       
+       // CHEQUEO S1 DURANTE EMPUJE (Critical Patch)
+       if (!f1 && digitalRead(S1) == LOW) {
+         t1 = millis();
+         f1 = true;
+       }
+       
+       delay(15); 
+     }
+   }
+   
    empujeActivo = true;
    tiempoEmpuje = millis();
    
@@ -255,7 +288,7 @@ void detenerExperimento() {
 }
 
 // ============ PUBLICAR DATOS MQTT ============
-void publicarDatos(float tTotal, float velocidad, float aceleracion, float v12, float v23, float v34, float t12, float t23, float t34) {
+void publicarDatos(float tTotal, float velocidad, float aceleracion, float v12, float v23, float v34, float t12, float t23, float t34, bool failed = false) {
   // Crear JSON con los datos + tiempos intermedios para graficar
   String json = "{";
   json += "\"tiempo\":" + String(tTotal, 3) + ",";
@@ -268,13 +301,109 @@ void publicarDatos(float tTotal, float velocidad, float aceleracion, float v12, 
   json += "\"t12\":" + String(t12, 3) + ",";  // tiempo acumulado al llegar a S2
   json += "\"t23\":" + String(t23, 3) + ",";  // tiempo acumulado al llegar a S3
   json += "\"t34\":" + String(t34, 3) + ",";  // tiempo acumulado al llegar a S4 (=tTotal)
+  json += "\"mode\":\"" + modoExperimento + "\",";  // Modo: "remote" o "presential"
+  json += "\"failed\":" + String(failed ? "true" : "false") + ",";  // Marcar si fue fallido
   json += "\"timestamp\":" + String(millis());
   json += "}";
   
-  Serial.print("Publicando: ");
+  Serial.print("Publicando (modo: ");
+  Serial.print(modoExperimento);
+  Serial.print(", failed: ");
+  Serial.print(failed ? "SI" : "NO");
+  Serial.print("): ");
   Serial.println(json);
   
   client.publish(topic_data, json.c_str());
+}
+
+// ============ FINALIZAR EXPERIMENTO COMO FALLIDO ============
+void finalizarExperimentoFallido() {
+  Serial.println("=== EXPERIMENTO FINALIZADO COMO FALLIDO (boton presionado) ===");
+  
+  // Detener motor inmediatamente
+  ledcWrite(ENA, 0);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  
+  // Retornar servo a posición inicial
+  servoCarrito.write(servoInicial);
+  empujeActivo = false;
+  
+  // Calcular datos parciales si hay sensores detectados
+  if (t1 > 0) {
+    unsigned long tiempoActual = millis();
+    float tTotal = (tiempoActual - t1) / 1000.0;  // Tiempo desde S1 hasta ahora
+    
+    // Calcular tiempos parciales según sensores detectados
+    float t12 = 0, t23 = 0, t34 = 0;
+    float v12 = 0, v23 = 0, v34 = 0;
+    float velocidad = 0, aceleracion = 0;
+    
+    if (t2 > 0) {
+      t12 = (t2 - t1) / 1000.0;
+      if (t12 > 0) v12 = d / t12;
+    }
+    if (t3 > 0) {
+      t23 = (t3 - t2) / 1000.0;
+      if (t23 > 0) v23 = d / t23;
+    }
+    if (t4 > 0) {
+      t34 = (t4 - t3) / 1000.0;
+      if (t34 > 0) v34 = d / t34;
+    }
+    
+    // Calcular velocidad promedio y aceleración si hay datos suficientes
+    if (tTotal > 0) {
+      int sensoresDetectados = 0;
+      if (f1) sensoresDetectados++;
+      if (f2) sensoresDetectados++;
+      if (f3) sensoresDetectados++;
+      if (f4) sensoresDetectados++;
+      
+      if (sensoresDetectados > 1) {
+        velocidad = (d * sensoresDetectados) / tTotal;
+      }
+      
+      // Calcular aceleración si hay al menos 2 velocidades
+      if (v12 > 0 && v23 > 0 && t23 > 0) {
+        aceleracion = (v23 - v12) / t23;
+      } else if (v23 > 0 && v34 > 0 && t34 > 0) {
+        aceleracion = (v34 - v23) / t34;
+      }
+    }
+    
+    // Tiempos acumulados desde t1
+    float tAcum12 = t12;
+    float tAcum23 = t23 > 0 ? (t3 - t1) / 1000.0 : 0;
+    float tAcum34 = t34 > 0 ? (t4 - t1) / 1000.0 : 0;
+    
+    // Publicar datos con failed: true
+    publicarDatos(tTotal, velocidad, aceleracion, v12, v23, v34, tAcum12, tAcum23, tAcum34, true);
+    
+    // Mostrar en LCD
+    lcd.clear();
+    lcd.print("PRUEBA FALLIDA");
+    lcd.setCursor(0, 1);
+    lcd.print("t=");
+    lcd.print(tTotal, 2);
+    lcd.print("s");
+  } else {
+    // Si no se detectó ningún sensor, publicar datos con tiempo 0
+    publicarDatos(0, 0, 0, 0, 0, 0, 0, 0, 0, true);
+    
+    lcd.clear();
+    lcd.print("PRUEBA FALLIDA");
+    lcd.setCursor(0, 1);
+    lcd.print("Sin datos");
+  }
+  
+  // Publicar estado finalizado
+  client.publish(topic_status, "{\"status\":\"Finalizado\"}");
+  
+  delay(2000);
+  
+  // Resetear sistema
+  resetSistema();
 }
  
  // ============ SETUP ============
@@ -328,14 +457,23 @@ void publicarDatos(float tTotal, float velocidad, float aceleracion, float v12, 
    }
    client.loop();
    
-   // -------- BOTÓN FÍSICO --------
-   bool botonActual = digitalRead(pinBoton);
-   
-   if (botonAnterior == HIGH && botonActual == LOW) {
-     iniciarExperimento();
-   }
-   
-   botonAnterior = botonActual;
+ // -------- BOTÓN FÍSICO --------
+  bool botonActual = digitalRead(pinBoton);
+  
+  if (botonAnterior == HIGH && botonActual == LOW) {
+    // Si el experimento ya está activo, finalizarlo como fallido
+    if (experimentoActivo) {
+      Serial.println("⚠️ Boton presionado durante experimento activo - Finalizando como fallido");
+      finalizarExperimentoFallido();
+    } else {
+      // Si no hay experimento activo, iniciar uno nuevo
+      modoExperimento = "presential";  // Botón físico = presencial
+      Serial.println("=== MODO: PRESENCIAL (boton fisico) ===");
+      iniciarExperimento();
+    }
+  }
+  
+  botonAnterior = botonActual;
    
    // -------- RETORNO SERVO (solo retornar, NO apagar motor) --------
    // El servo solo se retorna después de 5 segundos, pero el motor sigue activo
@@ -487,8 +625,8 @@ void calcularMRUA() {
   float tAcum23 = (t3 - t1) / 1000.0;
   float tAcum34 = (t4 - t1) / 1000.0;
 
-  // Publicar en MQTT
-  publicarDatos(tTotal, vProm, a, v12, v23, v34, tAcum12, tAcum23, tAcum34);
+  // Publicar en MQTT (experimento completado exitosamente, failed: false)
+  publicarDatos(tTotal, vProm, a, v12, v23, v34, tAcum12, tAcum23, tAcum34, false);
 
   // Publicar estado finalizado
   client.publish(topic_status, "{\"status\":\"Finalizado\"}");

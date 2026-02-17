@@ -149,15 +149,72 @@ mqttClient.on("message", (topic, payload) => {
   try {
     const msg = JSON.parse(payload.toString());
     if (topic === MQTT_TOPIC_DATA) {
-      latestData = { ...msg };
+      // Guardar todos los campos recibidos del ESP32
+      latestData = { 
+        ...msg,
+        timestamp: Date.now() // Agregar timestamp para tracking
+      };
       if (msg.tiempo !== undefined && msg.distancia !== undefined) {
         latestStatus = "Ejecutando";
       }
       persistLatest();
+      console.log("[MQTT] Datos actualizados (modo:", msg.mode || "unknown", "):", {
+        tiempo: latestData.tiempo,
+        velocidad: latestData.velocidad,
+        aceleracion: latestData.aceleracion,
+        t12: latestData.t12,
+        t23: latestData.t23,
+        t34: latestData.t34
+      });
     }
     if (topic === MQTT_TOPIC_STATUS && msg.status) {
       latestStatus = msg.status;
       persistLatest();
+      
+      // Si el experimento finalizó y hay datos válidos, guardar automáticamente en history
+      if (msg.status === "Finalizado" && latestData && latestData.tiempo && latestData.tiempo > 0) {
+        // Verificar si ya existe un experimento reciente con el mismo timestamp para evitar duplicados
+        const existingExp = history.find(h => 
+          Math.abs((h.timestamp || 0) - (latestData.timestamp || 0)) < 5000 && // Mismo timestamp (5 segundos de margen)
+          Math.abs((h.tiempo || 0) - (latestData.tiempo || 0)) < 0.01 // Mismo tiempo
+        );
+        
+        if (!existingExp) {
+          console.log("[MQTT] Experimento finalizado, guardando automáticamente en history...");
+          
+          // Marcar como fallido si el tiempo total es mayor a 3 segundos
+          const isFailed = latestData.tiempo > 3.0;
+          
+          const measurement = {
+            id: Date.now(),
+            fecha: new Date().toISOString(),
+            tiempo: latestData.tiempo,
+            distancia: latestData.distancia || 1.5,
+            velocidad: latestData.velocidad,
+            aceleracion: latestData.aceleracion,
+            v12: latestData.v12,
+            v23: latestData.v23,
+            v34: latestData.v34,
+            t12: latestData.t12,
+            t23: latestData.t23,
+            t34: latestData.t34,
+            mode: latestData.mode || "remote",
+            failed: isFailed,  // Fallido si tiempo > 3 segundos
+            timestamp: latestData.timestamp || Date.now()
+          };
+          
+          history.unshift(measurement);
+          if (history.length > 50) history.splice(50);
+          persistHistory(measurement);
+          console.log("[MQTT] Medicion guardada automaticamente en history:", {
+            tiempo: measurement.tiempo,
+            modo: measurement.mode,
+            failed: measurement.failed ? "SI (tiempo > 3s)" : "NO"
+          });
+        } else {
+          console.log("[MQTT] Experimento ya guardado en history, omitiendo duplicado");
+        }
+      }
     }
   } catch (e) {
     console.error("[MQTT] Error parseando mensaje:", e);
@@ -230,18 +287,61 @@ app.post("/make-server-761e42e2/stop-experiment", async (req, res) => {
 
 // Guardar medición en histórico (HTTP)
 app.post("/make-server-761e42e2/save-measurement", (req, res) => {
-  const { tiempo, distancia, velocidad, aceleracion, v12, v23, v34 } = req.body || {};
+  const { 
+    tiempo, 
+    distancia, 
+    velocidad, 
+    aceleracion, 
+    v12, 
+    v23, 
+    v34,
+    t12,
+    t23,
+    t34,
+    timestamp,
+    mode,  // Modo: "remote" o "presential"
+    failed  // true si fue finalizado manualmente (prueba fallida) o tiempo > 3s
+  } = req.body || {};
+  
+  // Validar que haya datos válidos antes de guardar
+  if (!tiempo || tiempo <= 0) {
+    return res.status(400).json({ success: false, error: "Tiempo inválido o faltante" });
+  }
+  
+  // Marcar como fallido si:
+  // 1. El usuario lo marcó explícitamente (failed === true)
+  // 2. El tiempo total es mayor a 3 segundos
+  const isFailed = failed === true || tiempo > 3.0;
+  
   const measurement = {
     id: Date.now(),
     fecha: new Date().toISOString(),
     tiempo,
-    distancia,
+    distancia: distancia || 1.5, // Default 1.5m si no se proporciona
     velocidad,
     aceleracion,
     v12,
     v23,
     v34,
+    t12,  // Tiempo acumulado al sensor 2
+    t23,  // Tiempo acumulado al sensor 3
+    t34,  // Tiempo acumulado al sensor 4 (tiempo total)
+    mode: mode || "remote",  // Modo: "remote" o "presential" (default: remote)
+    failed: isFailed,  // true si fue finalizado manualmente o tiempo > 3s
+    timestamp: timestamp || Date.now()
   };
+  
+  console.log("[Mongo] Guardando medicion:", {
+    tiempo: measurement.tiempo,
+    velocidad: measurement.velocidad,
+    aceleracion: measurement.aceleracion,
+    t12: measurement.t12,
+    t23: measurement.t23,
+    t34: measurement.t34,
+    mode: measurement.mode,
+    failed: measurement.failed ? (tiempo > 3.0 ? "SI (tiempo > 3s)" : "SI (finalizado manualmente)") : "NO"
+  });
+  
   history.unshift(measurement);
   if (history.length > 50) history.splice(50);
   persistHistory(measurement);
